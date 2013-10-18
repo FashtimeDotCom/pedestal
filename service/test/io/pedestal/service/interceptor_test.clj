@@ -11,6 +11,7 @@
 
 (ns io.pedestal.service.interceptor-test
   (:require [clojure.test :refer (deftest is)]
+            [clojure.core.async :refer [<!! >! go chan timeout]]
             [io.pedestal.service.interceptor :as interceptor
              :refer (definterceptor definterceptorfn interceptor defaround defmiddleware)]
             [io.pedestal.service.impl.interceptor :as impl
@@ -36,6 +37,17 @@
     :error (fn [context error]
              (update-in context [::trace] (fnil conj [])
                         [:error name :from (:from (ex-data error))]))))
+
+(definterceptorfn channeler [name]
+  (assoc (tracer name)
+    :enter (fn [context]
+             (let [chan (chan)
+                   context* (-> (trace context :enter name)
+                                (update-in [::thread-ids] (fnil conj []) (.. Thread currentThread getId)))]
+               (go
+                (<!! (timeout 1000))
+                (>! chan context*))
+               chan))))
 
 (definterceptorfn delayer [name]
   (assoc (tracer name)
@@ -85,6 +97,25 @@
                            (tracer :e)
                            (thrower :f)
                            (tracer :g))))))
+(deftest t-two-channels
+  (let [p (promise)]
+    (execute (enqueue {}
+                      (deliverer p)
+                      (tracer :a)
+                      (channeler :b)
+                      (channeler :c)
+                      (tracer :d)))
+    (is (= [[:enter :a]
+            [:enter :b]
+            [:enter :c]
+            [:enter :d]
+            [:leave :d]
+            [:leave :c]
+            [:leave :b]
+            [:leave :a]]
+           (@p ::trace)))
+    (is (= 2
+           (-> @p ::thread-ids distinct count)))))
 
 (deftest t-simple-async
   (let [p (promise)]
