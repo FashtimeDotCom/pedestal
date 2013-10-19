@@ -45,7 +45,7 @@
                    context* (-> (trace context :enter name)
                                 (update-in [::thread-ids] (fnil conj []) (.. Thread currentThread getId)))]
                (go
-                (<!! (timeout 1000))
+                (<!! (timeout 100))
                 (>! chan context*))
                chan))))
 
